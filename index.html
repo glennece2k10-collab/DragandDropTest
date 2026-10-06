@@ -1,0 +1,131 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Drop Zone</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=DM+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: header, a tray of draggable tiles, and three drop bins. Items move between zones by pointer, touch or keyboard. */
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --fg:#1d2420; --muted:#66706a; --line:#d5dad4;
+  --accent:#1f7a5c; --accent-soft:#dcefe7; --hover:#e9f3ee;
+  --display:'Bricolage Grotesque','Trebuchet MS',sans-serif;
+  --body:'DM Sans',system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121815; --surface:#1b231f; --fg:#e8eee9; --muted:#97a39b; --line:#2e3a33;
+  --accent:#4fc79b; --accent-soft:#1f3a30; --hover:#223229; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121815; --surface:#1b231f; --fg:#e8eee9; --muted:#97a39b; --line:#2e3a33;
+  --accent:#4fc79b; --accent-soft:#1f3a30; --hover:#223229; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;padding-inline:16px;padding-block:32px}
+main{max-width:860px;margin-inline:auto;display:flex;flex-direction:column;gap:24px}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(2rem,6vw,3rem);margin:0;text-wrap:balance;letter-spacing:-.02em}
+p.lead{margin:8px 0 0;color:var(--muted);max-width:60ch}
+.zone{background:var(--surface);border:2px dashed var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;transition:background .15s,border-color .15s}
+.zone h2{font-family:var(--display);font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0;display:flex;justify-content:space-between}
+.items{display:flex;flex-wrap:wrap;gap:10px;min-height:56px;align-content:flex-start}
+.zone.over{background:var(--hover);border-color:var(--accent)}
+.bins{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.item{font:500 1rem var(--body);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 14px;cursor:grab;touch-action:none;user-select:none;display:flex;gap:8px;align-items:center}
+.item::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--c,var(--accent))}
+.item:hover{border-color:var(--accent)}
+.item:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.item.drag{position:fixed;z-index:10;pointer-events:none;cursor:grabbing;box-shadow:0 8px 20px rgba(0,0,0,.25);transform:rotate(-2deg)}
+.item.ghost{opacity:.35}
+.empty{color:var(--muted);font-size:.9rem;align-self:center}
+.bar{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+button{font:500 .9rem var(--body);color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#status{color:var(--muted);font-size:.9rem}
+@media (prefers-reduced-motion:reduce){.zone{transition:none}}
+</style>
+
+<main>
+  <header>
+    <h1>Drop Zone</h1>
+    <p class="lead">Sort the launch tasks. Drag a tile into a bin, or focus one and press 1, 2 or 3 to send it there. Press 0 to return it.</p>
+  </header>
+
+  <section class="zone" data-zone="tray" aria-label="Tray">
+    <h2>Tray <span class="count"></span></h2>
+    <div class="items"></div>
+  </section>
+
+  <div class="bins">
+    <section class="zone" data-zone="today" aria-label="Today"><h2>1 · Today <span class="count"></span></h2><div class="items"></div></section>
+    <section class="zone" data-zone="week" aria-label="This week"><h2>2 · This week <span class="count"></span></h2><div class="items"></div></section>
+    <section class="zone" data-zone="later" aria-label="Later"><h2>3 · Later <span class="count"></span></h2><div class="items"></div></section>
+  </div>
+
+  <div class="bar"><span id="status" role="status" aria-live="polite">Ready.</span><button id="reset" type="button">Reset</button></div>
+</main>
+
+<script>
+const START=[["Book venue","#1f7a5c"],["Draft invite list","#c9742b"],["Order signage","#3b6fb6"],["Confirm caterer","#a64a7a"],["Test projector","#7a8a1f"],["Send reminders","#b8453d"]];
+const ORDER=["tray","today","week","later"];
+const NAMES={tray:"the tray",today:"Today",week:"This week",later:"Later"};
+let items=[];
+const $=s=>document.querySelector(s), status=$("#status");
+
+function reset(){
+  items=START.map(([t,c],i)=>({id:i,t,c,zone:"tray"}));
+  render("Ready.");
+}
+function render(msg,focusId){
+  document.querySelectorAll(".zone").forEach(z=>{
+    const box=z.querySelector(".items"); box.innerHTML="";
+    const list=items.filter(i=>i.zone===z.dataset.zone);
+    z.querySelector(".count").textContent=list.length;
+    if(!list.length){const e=document.createElement("span");e.className="empty";e.textContent=z.dataset.zone==="tray"?"All sorted.":"Drop tiles here.";box.append(e)}
+    list.forEach(i=>{
+      const el=document.createElement("div");
+      el.className="item";el.tabIndex=0;el.textContent=i.t;el.dataset.id=i.id;el.style.setProperty("--c",i.c);
+      el.setAttribute("role","button");el.setAttribute("aria-label",i.t+", in "+NAMES[i.zone]);
+      box.append(el);
+    });
+  });
+  if(msg)status.textContent=msg;
+  if(focusId!=null){const f=document.querySelector(`.item[data-id="${focusId}"]`);f&&f.focus()}
+}
+function move(id,zone){
+  const it=items.find(i=>i.id==id); if(!it||it.zone===zone)return;
+  it.zone=zone; items=items.filter(i=>i!==it); items.push(it);
+  render(it.t+" moved to "+NAMES[zone]+".",id);
+}
+
+/* Pointer-based drag works for mouse and touch. */
+let drag=null;
+document.addEventListener("pointerdown",e=>{
+  const el=e.target.closest(".item"); if(!el||e.button>0)return;
+  const r=el.getBoundingClientRect();
+  const clone=el.cloneNode(true); clone.classList.add("drag");
+  clone.style.width=r.width+"px"; clone.style.left=r.left+"px"; clone.style.top=r.top+"px";
+  document.body.append(clone); el.classList.add("ghost");
+  drag={id:el.dataset.id,clone,dx:e.clientX-r.left,dy:e.clientY-r.top,over:null,src:el};
+  e.preventDefault();
+});
+document.addEventListener("pointermove",e=>{
+  if(!drag)return;
+  drag.clone.style.left=(e.clientX-drag.dx)+"px"; drag.clone.style.top=(e.clientY-drag.dy)+"px";
+  const z=document.elementsFromPoint(e.clientX,e.clientY).map(n=>n.closest&&n.closest(".zone")).find(Boolean)||null;
+  if(z!==drag.over){drag.over&&drag.over.classList.remove("over"); z&&z.classList.add("over"); drag.over=z}
+});
+function end(){
+  if(!drag)return;
+  const {id,clone,over}=drag; clone.remove(); drag=null;
+  document.querySelectorAll(".zone.over").forEach(z=>z.classList.remove("over"));
+  if(over)move(id,over.dataset.zone); else render("Dropped outside a bin. Nothing changed.");
+}
+document.addEventListener("pointerup",end);
+document.addEventListener("pointercancel",end);
+
+/* Keyboard alternative */
+document.addEventListener("keydown",e=>{
+  const el=e.target.closest&&e.target.closest(".item"); if(!el)return;
+  const n=["0","1","2","3"].indexOf(e.key);
+  if(n>-1)move(el.dataset.id,ORDER[n]);
+});
+$("#reset").addEventListener("click",reset);
+reset();
+</script>
+
+</body></html>
